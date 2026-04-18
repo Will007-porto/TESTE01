@@ -34,10 +34,10 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
       </div>
       <h1 class="text-3xl font-bold tracking-tight">Consulta de Filtros</h1>
-      <p class="text-slate-500 dark:text-slate-400 mt-2">Gestão de Ativos e Manutenção - Construtora Tipoloni</p>
+      <p class="text-slate-500 dark:text-slate-400 mt-2">Engenharia e Manutenção - Construtora Tipoloni</p>
       <div id="statusBadge" class="mt-4 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-        Sincronizando base de dados...
+        Sincronizando base GID 304337534...
       </div>
     </header>
 
@@ -62,23 +62,23 @@
       <div id="resultInfo" class="mt-2 px-2 text-xs text-slate-500 font-medium"></div>
     </div>
 
-    <div id="resultsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      </div>
+    <div id="resultsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
 
-    <div id="emptyState" class="hidden flex flex-col items-center py-10 text-slate-400">
+    <div id="emptyState" class="hidden flex flex-col items-center py-20 text-slate-400">
       <svg width="64" height="64" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-      <p class="mt-4 font-medium" id="emptyStateMsg">Nenhum filtro encontrado para esta busca.</p>
+      <p class="mt-4 font-medium" id="emptyStateMsg">Nenhum filtro ou paralelo encontrado.</p>
     </div>
 
     <footer class="mt-20 py-8 border-t border-slate-200 dark:border-slate-800 text-center">
-      <p class="text-xs text-slate-500 uppercase tracking-widest">Base de Dados Via Google Sheets (CSV)</p>
+      <p class="text-xs text-slate-500 uppercase tracking-widest">Base Estruturada via Google Sheets</p>
     </footer>
   </div>
 
   <script>
+    // Link convertido para CSV para processamento de dados
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQtzrZy3r-xQAhniUEGC-Jh8EQg7Sdk6_g3h5uETgmciJR9c_lLMXZNQ9_Dj1YzHnDiF0Mv9NpWkSZN/pub?gid=304337534&single=true&output=csv';
     
-    // Rotas de redundância para evitar bloqueio CORS em arquivos locais
+    // Rotas de redundância contra bloqueio CORS em arquivos locais
     const urlsToTry = [
       CSV_URL, 
       `https://corsproxy.io/?${encodeURIComponent(CSV_URL)}`,
@@ -102,9 +102,7 @@
         try {
           const response = await fetch(urlsToTry[i]);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const text = await response.text();
-          if (text.includes("<html>")) throw new Error("Aviso: Retornou HTML em vez de CSV");
-          return text; 
+          return await response.text();
         } catch (err) {
           lastError = err.message;
         }
@@ -120,8 +118,6 @@
           header: true,
           skipEmptyLines: true,
           complete: function(results) {
-            
-            // Definição das colunas de paralelos existentes na planilha
             const paraleloCols = [
               'Código Paralelo', 'Código Paralelo (1)', 'Código Paralelo (2)', 
               'Código Paralelo (3)', 'Código Paralelo (4)', 'Código Paralelo (5)', 
@@ -129,42 +125,33 @@
             ];
 
             database = results.data.map(item => {
-              // Extrai apenas os paralelos preenchidos
-              const paralelosPreenchidos = paraleloCols
+              const listParalelos = paraleloCols
                 .map(col => (item[col] || '').trim())
                 .filter(val => val !== '');
 
               return {
-                ...item,
-                paralelosList: paralelosPreenchidos, // Salva o array para uso visual
-                // O índice de busca agora inclui os paralelos, garantindo que sejam encontrados na pesquisa
-                _search: cleanStr(`${item['Código Protheus']} ${item['Códigos e descrição']} ${item['Código Original']} ${paralelosPreenchidos.join(' ')}`)
+                protheus: (item['Código Protheus'] || '').trim(),
+                descricao: (item['Códigos e descrição'] || '').trim(),
+                original: (item['Código Original'] || '').trim(),
+                paralelos: listParalelos,
+                // O índice busca em TUDO: Protheus, Descrição, Original e todos os Paralelos
+                _search: cleanStr(`${item['Código Protheus']} ${item['Códigos e descrição']} ${item['Código Original']} ${listParalelos.join(' ')}`)
               };
             });
             
-            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${database.length} Itens Carregados`;
+            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${database.length} Filtros Indexados`;
             statusBadge.classList.replace('bg-slate-100', 'bg-emerald-50/50');
             
             searchInput.disabled = false;
             btnSearch.disabled = false;
-            searchInput.placeholder = "Pesquisar por Código Protheus, Original ou Paralelo...";
+            searchInput.placeholder = "Busque Código Protheus, Original ou Paralelo...";
             searchInput.focus();
           }
         });
       } catch (err) {
         statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Erro de Conexão`;
         emptyState.classList.remove('hidden');
-        emptyStateMsg.innerHTML = `
-          <div class="text-left bg-slate-100 dark:bg-slate-800 p-6 rounded-xl mt-4 max-w-xl">
-            <p class="text-red-500 font-bold mb-2">Seu navegador bloqueou o acesso à planilha.</p>
-            <p class="text-sm text-slate-600 dark:text-slate-300 mb-4">Isso acontece por segurança quando você abre arquivos usando dois cliques (endereço <code class="bg-white dark:bg-black px-1 rounded">file:///</code>).</p>
-            <p class="text-sm font-bold text-slate-700 dark:text-slate-200">Como resolver definitivamente:</p>
-            <ul class="text-sm text-slate-600 dark:text-slate-300 list-disc pl-5 mt-2 space-y-1">
-              <li>Opção 1: Use a extensão <b>Live Server</b> no VS Code.</li>
-              <li>Opção 2: Hospede este arquivo gratuitamente no <b>Vercel</b> ou <b>Netlify Drop</b>.</li>
-            </ul>
-          </div>
-        `;
+        emptyStateMsg.innerHTML = `<div class="text-center p-4 bg-red-50 dark:bg-red-900/20 rounded-xl text-red-600 dark:text-red-400 text-sm">Falha ao carregar planilha. Use o Live Server ou hospede o arquivo.</div>`;
       }
     }
 
@@ -173,60 +160,54 @@
       
       if (items.length === 0) {
         emptyState.classList.remove('hidden');
-        emptyStateMsg.textContent = "Nenhum filtro encontrado para esta busca.";
         resultInfo.textContent = "";
         return;
       }
 
       emptyState.classList.add('hidden');
-      resultInfo.textContent = `${items.length} resultados encontrados`;
+      resultInfo.textContent = `${items.length} resultado(s)`;
 
       items.forEach(item => {
         const card = document.createElement('div');
         card.className = "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col";
         
-        // Monta o HTML dos paralelos se houverem
-        let paralelosHTML = '';
-        if (item.paralelosList && item.paralelosList.length > 0) {
-          const badges = item.paralelosList.map(p => `
-            <button onclick="copy('${p}')" class="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors border border-slate-200 dark:border-slate-700 text-left" title="Copiar código paralelo">
-              ${p}
-            </button>
-          `).join('');
-
-          paralelosHTML = `
-            <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex-grow">
-              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-2">Alternativas / Paralelos</span>
-              <div class="flex flex-wrap gap-2">
-                ${badges}
-              </div>
+        // Renderização dos Paralelos como tags clicáveis
+        const paralelosSection = item.paralelos.length > 0 ? `
+          <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+            <span class="block text-[10px] uppercase text-slate-400 font-bold mb-2">Equivalentes / Paralelos</span>
+            <div class="flex flex-wrap gap-1.5">
+              ${item.paralelos.map(p => `
+                <button onclick="copy('${p}')" class="px-2 py-1 text-[11px] font-medium bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  ${p}
+                </button>
+              `).join('')}
             </div>
-          `;
-        }
+          </div>
+        ` : '';
 
         card.innerHTML = `
           <div class="flex justify-between items-start mb-4">
             <span class="text-[10px] font-bold px-2 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded uppercase">Protheus</span>
-            <button onclick="copy('${item['Código Protheus']}')" class="text-slate-400 hover:text-indigo-600 transition" title="Copiar código Protheus">
+            <button onclick="copy('${item.protheus}')" class="text-slate-400 hover:text-indigo-600 transition">
               <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
-          <h2 class="text-xl font-bold mb-1">${item['Código Protheus'] || 'N/A'}</h2>
-          <p class="text-sm text-slate-600 dark:text-slate-400 leading-snug mb-4">${item['Códigos e descrição'] || 'Sem descrição'}</p>
+          <h2 class="text-xl font-bold mb-1">${item.protheus || 'N/A'}</h2>
+          <p class="text-sm text-slate-600 dark:text-slate-400 leading-snug mb-4">${item.descricao}</p>
           
-          <div class="pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2">
+          <div class="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2">
             <div>
-              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-1">Original</span>
-              <button onclick="copy('${item['Código Original']}')" class="text-xs font-mono font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-1 rounded hover:opacity-80 transition" title="Copiar original">
-                ${item['Código Original'] || '---'}
+              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-1">Código Original</span>
+              <button onclick="copy('${item.original}')" class="text-xs font-mono font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-1 rounded hover:opacity-80 transition">
+                ${item.original || '---'}
               </button>
             </div>
             <div class="text-right">
-              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-1">Status</span>
-              <span class="text-xs font-medium text-emerald-600">Ativo</span>
+              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-1">Engenharia</span>
+              <span class="text-xs font-medium text-emerald-600">Disponível</span>
             </div>
           </div>
-          ${paralelosHTML}
+          ${paralelosSection}
         `;
         resultsGrid.appendChild(card);
       });
@@ -240,17 +221,16 @@
         emptyState.classList.add('hidden');
         return;
       }
-
       const filtered = database.filter(item => item._search && item._search.includes(query));
       renderCards(filtered, query);
     }
 
     window.copy = (text) => {
-      if(!text || text === 'N/A' || text === '---') return;
+      if(!text || text === '---') return;
       navigator.clipboard.writeText(text);
       const btn = event.currentTarget;
       const original = btn.innerHTML;
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500 inline-block"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      btn.innerHTML = '<span class="text-emerald-500">Copiado!</span>';
       setTimeout(() => btn.innerHTML = original, 1000);
     };
 
@@ -260,7 +240,6 @@
     });
 
     btnSearch.addEventListener('click', search);
-
     init();
   </script>
 </body>
