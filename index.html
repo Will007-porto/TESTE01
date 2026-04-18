@@ -78,7 +78,7 @@
   <script>
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQtzrZy3r-xQAhniUEGC-Jh8EQg7Sdk6_g3h5uETgmciJR9c_lLMXZNQ9_Dj1YzHnDiF0Mv9NpWkSZN/pub?gid=304337534&single=true&output=csv';
     
-    // 3 Rotas de conexão diferentes para driblar o bloqueio do navegador
+    // Rotas de redundância para evitar bloqueio CORS em arquivos locais
     const urlsToTry = [
       CSV_URL, 
       `https://corsproxy.io/?${encodeURIComponent(CSV_URL)}`,
@@ -98,17 +98,14 @@
 
     async function fetchCSV() {
       let lastError = "";
-      
       for (let i = 0; i < urlsToTry.length; i++) {
         try {
-          console.log(`Tentando rota ${i + 1}...`);
           const response = await fetch(urlsToTry[i]);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const text = await response.text();
           if (text.includes("<html>")) throw new Error("Aviso: Retornou HTML em vez de CSV");
           return text; 
         } catch (err) {
-          console.warn(`Rota ${i + 1} falhou:`, err.message);
           lastError = err.message;
         }
       }
@@ -123,25 +120,40 @@
           header: true,
           skipEmptyLines: true,
           complete: function(results) {
-            database = results.data.map(item => ({
-              ...item,
-              _search: cleanStr(`${item['Código Protheus']} ${item['Códigos e descrição']} ${item['Código Original']}`)
-            }));
+            
+            // Definição das colunas de paralelos existentes na planilha
+            const paraleloCols = [
+              'Código Paralelo', 'Código Paralelo (1)', 'Código Paralelo (2)', 
+              'Código Paralelo (3)', 'Código Paralelo (4)', 'Código Paralelo (5)', 
+              'Código Paralelo (6)', 'Código Paralelo (7)'
+            ];
+
+            database = results.data.map(item => {
+              // Extrai apenas os paralelos preenchidos
+              const paralelosPreenchidos = paraleloCols
+                .map(col => (item[col] || '').trim())
+                .filter(val => val !== '');
+
+              return {
+                ...item,
+                paralelosList: paralelosPreenchidos, // Salva o array para uso visual
+                // O índice de busca agora inclui os paralelos, garantindo que sejam encontrados na pesquisa
+                _search: cleanStr(`${item['Código Protheus']} ${item['Códigos e descrição']} ${item['Código Original']} ${paralelosPreenchidos.join(' ')}`)
+              };
+            });
             
             statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${database.length} Itens Carregados`;
             statusBadge.classList.replace('bg-slate-100', 'bg-emerald-50/50');
             
             searchInput.disabled = false;
             btnSearch.disabled = false;
-            searchInput.placeholder = "Pesquisar por Código Protheus, Original ou Descrição...";
+            searchInput.placeholder = "Pesquisar por Código Protheus, Original ou Paralelo...";
             searchInput.focus();
           }
         });
       } catch (err) {
         statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Erro de Conexão`;
         emptyState.classList.remove('hidden');
-        
-        // Agora mostramos a instrução real na tela
         emptyStateMsg.innerHTML = `
           <div class="text-left bg-slate-100 dark:bg-slate-800 p-6 rounded-xl mt-4 max-w-xl">
             <p class="text-red-500 font-bold mb-2">Seu navegador bloqueou o acesso à planilha.</p>
@@ -149,9 +161,8 @@
             <p class="text-sm font-bold text-slate-700 dark:text-slate-200">Como resolver definitivamente:</p>
             <ul class="text-sm text-slate-600 dark:text-slate-300 list-disc pl-5 mt-2 space-y-1">
               <li>Opção 1: Use a extensão <b>Live Server</b> no VS Code.</li>
-              <li>Opção 2: Hospede este arquivo gratuitamente no <b>Vercel</b>, <b>Netlify Drop</b> ou <b>GitHub Pages</b>. Assim ele ganhará um link <code>https://</code> real e funcionará para qualquer pessoa da empresa.</li>
+              <li>Opção 2: Hospede este arquivo gratuitamente no <b>Vercel</b> ou <b>Netlify Drop</b>.</li>
             </ul>
-            <p class="text-xs text-slate-400 mt-4 border-t border-slate-200 dark:border-slate-700 pt-2">Erro técnico: ${err.message}</p>
           </div>
         `;
       }
@@ -172,27 +183,50 @@
 
       items.forEach(item => {
         const card = document.createElement('div');
-        card.className = "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow";
+        card.className = "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow flex flex-col";
         
+        // Monta o HTML dos paralelos se houverem
+        let paralelosHTML = '';
+        if (item.paralelosList && item.paralelosList.length > 0) {
+          const badges = item.paralelosList.map(p => `
+            <button onclick="copy('${p}')" class="px-2.5 py-1 text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors border border-slate-200 dark:border-slate-700 text-left" title="Copiar código paralelo">
+              ${p}
+            </button>
+          `).join('');
+
+          paralelosHTML = `
+            <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 flex-grow">
+              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-2">Alternativas / Paralelos</span>
+              <div class="flex flex-wrap gap-2">
+                ${badges}
+              </div>
+            </div>
+          `;
+        }
+
         card.innerHTML = `
           <div class="flex justify-between items-start mb-4">
             <span class="text-[10px] font-bold px-2 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded uppercase">Protheus</span>
-            <button onclick="copy('${item['Código Protheus']}')" class="text-slate-400 hover:text-indigo-600 transition">
+            <button onclick="copy('${item['Código Protheus']}')" class="text-slate-400 hover:text-indigo-600 transition" title="Copiar código Protheus">
               <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
           <h2 class="text-xl font-bold mb-1">${item['Código Protheus'] || 'N/A'}</h2>
           <p class="text-sm text-slate-600 dark:text-slate-400 leading-snug mb-4">${item['Códigos e descrição'] || 'Sem descrição'}</p>
+          
           <div class="pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2">
             <div>
-              <span class="block text-[10px] uppercase text-slate-400 font-bold">Original</span>
-              <span class="text-xs font-mono font-medium">${item['Código Original'] || '---'}</span>
+              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-1">Original</span>
+              <button onclick="copy('${item['Código Original']}')" class="text-xs font-mono font-bold bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-2 py-1 rounded hover:opacity-80 transition" title="Copiar original">
+                ${item['Código Original'] || '---'}
+              </button>
             </div>
             <div class="text-right">
-              <span class="block text-[10px] uppercase text-slate-400 font-bold">Status</span>
-              <span class="text-xs font-medium text-emerald-600">Disponível</span>
+              <span class="block text-[10px] uppercase text-slate-400 font-bold mb-1">Status</span>
+              <span class="text-xs font-medium text-emerald-600">Ativo</span>
             </div>
           </div>
+          ${paralelosHTML}
         `;
         resultsGrid.appendChild(card);
       });
@@ -212,12 +246,12 @@
     }
 
     window.copy = (text) => {
-      if(!text || text === 'N/A') return;
+      if(!text || text === 'N/A' || text === '---') return;
       navigator.clipboard.writeText(text);
       const btn = event.currentTarget;
       const original = btn.innerHTML;
-      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-      setTimeout(() => btn.innerHTML = original, 2000);
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500 inline-block"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      setTimeout(() => btn.innerHTML = original, 1000);
     };
 
     searchInput.addEventListener('input', () => {
