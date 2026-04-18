@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consulta de Filtros | Tipoloni</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'media',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    html { scrollbar-gutter: stable; }
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .dark ::-webkit-scrollbar-thumb { background: #334155; }
+    mark { background: #fde047; color: #000; border-radius: 2px; padding: 0 1px; }
+  </style>
+</head>
+<body class="min-h-screen bg-[#fafbff] dark:bg-[#020617] text-slate-900 dark:text-slate-100 font-sans antialiased">
+  
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <header class="flex flex-col items-center mb-10 text-center">
+      <div class="w-16 h-16 bg-gradient-to-br from-indigo-600 to-blue-500 rounded-2xl shadow-xl flex items-center justify-center mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+      </div>
+      <h1 class="text-3xl font-bold tracking-tight">Consulta de Filtros</h1>
+      <p class="text-slate-500 dark:text-slate-400 mt-2">Gestão de Ativos e Manutenção - Construtora Tipoloni</p>
+      <div id="statusBadge" class="mt-4 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+        Sincronizando base de dados...
+      </div>
+    </header>
+
+    <div class="sticky top-4 z-50 mb-8">
+      <div class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-2 rounded-2xl shadow-2xl border border-slate-200/50 dark:border-white/10">
+        <div class="flex flex-col sm:flex-row gap-2">
+          <div class="relative flex-1">
+            <input 
+              id="searchInput"
+              type="text"
+              disabled
+              placeholder="Aguarde o carregamento..."
+              class="w-full h-14 pl-12 pr-4 rounded-xl bg-slate-50 dark:bg-slate-800 border-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-50"
+            >
+            <svg class="absolute left-4 top-4 text-slate-400" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </div>
+          <button id="btnSearch" disabled class="h-14 px-8 bg-slate-900 dark:bg-white dark:text-slate-900 text-white font-bold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50">
+            BUSCAR
+          </button>
+        </div>
+      </div>
+      <div id="resultInfo" class="mt-2 px-2 text-xs text-slate-500 font-medium"></div>
+    </div>
+
+    <div id="resultsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      </div>
+
+    <div id="emptyState" class="hidden flex flex-col items-center py-10 text-slate-400">
+      <svg width="64" height="64" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <p class="mt-4 font-medium" id="emptyStateMsg">Nenhum filtro encontrado para esta busca.</p>
+    </div>
+
+    <footer class="mt-20 py-8 border-t border-slate-200 dark:border-slate-800 text-center">
+      <p class="text-xs text-slate-500 uppercase tracking-widest">Base de Dados Via Google Sheets (CSV)</p>
+    </footer>
+  </div>
+
+  <script>
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQtzrZy3r-xQAhniUEGC-Jh8EQg7Sdk6_g3h5uETgmciJR9c_lLMXZNQ9_Dj1YzHnDiF0Mv9NpWkSZN/pub?gid=304337534&single=true&output=csv';
+    
+    // 3 Rotas de conexão diferentes para driblar o bloqueio do navegador
+    const urlsToTry = [
+      CSV_URL, 
+      `https://corsproxy.io/?${encodeURIComponent(CSV_URL)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(CSV_URL)}`
+    ];
+
+    let database = [];
+    const searchInput = document.getElementById('searchInput');
+    const btnSearch = document.getElementById('btnSearch');
+    const resultsGrid = document.getElementById('resultsGrid');
+    const statusBadge = document.getElementById('statusBadge');
+    const resultInfo = document.getElementById('resultInfo');
+    const emptyState = document.getElementById('emptyState');
+    const emptyStateMsg = document.getElementById('emptyStateMsg');
+
+    const cleanStr = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+    async function fetchCSV() {
+      let lastError = "";
+      
+      for (let i = 0; i < urlsToTry.length; i++) {
+        try {
+          console.log(`Tentando rota ${i + 1}...`);
+          const response = await fetch(urlsToTry[i]);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const text = await response.text();
+          if (text.includes("<html>")) throw new Error("Aviso: Retornou HTML em vez de CSV");
+          return text; 
+        } catch (err) {
+          console.warn(`Rota ${i + 1} falhou:`, err.message);
+          lastError = err.message;
+        }
+      }
+      throw new Error(lastError); 
+    }
+
+    async function init() {
+      try {
+        const csvText = await fetchCSV();
+
+        Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          complete: function(results) {
+            database = results.data.map(item => ({
+              ...item,
+              _search: cleanStr(`${item['Código Protheus']} ${item['Códigos e descrição']} ${item['Código Original']}`)
+            }));
+            
+            statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${database.length} Itens Carregados`;
+            statusBadge.classList.replace('bg-slate-100', 'bg-emerald-50/50');
+            
+            searchInput.disabled = false;
+            btnSearch.disabled = false;
+            searchInput.placeholder = "Pesquisar por Código Protheus, Original ou Descrição...";
+            searchInput.focus();
+          }
+        });
+      } catch (err) {
+        statusBadge.innerHTML = `<span class="w-2 h-2 rounded-full bg-red-500"></span> Erro de Conexão`;
+        emptyState.classList.remove('hidden');
+        
+        // Agora mostramos a instrução real na tela
+        emptyStateMsg.innerHTML = `
+          <div class="text-left bg-slate-100 dark:bg-slate-800 p-6 rounded-xl mt-4 max-w-xl">
+            <p class="text-red-500 font-bold mb-2">Seu navegador bloqueou o acesso à planilha.</p>
+            <p class="text-sm text-slate-600 dark:text-slate-300 mb-4">Isso acontece por segurança quando você abre arquivos usando dois cliques (endereço <code class="bg-white dark:bg-black px-1 rounded">file:///</code>).</p>
+            <p class="text-sm font-bold text-slate-700 dark:text-slate-200">Como resolver definitivamente:</p>
+            <ul class="text-sm text-slate-600 dark:text-slate-300 list-disc pl-5 mt-2 space-y-1">
+              <li>Opção 1: Use a extensão <b>Live Server</b> no VS Code.</li>
+              <li>Opção 2: Hospede este arquivo gratuitamente no <b>Vercel</b>, <b>Netlify Drop</b> ou <b>GitHub Pages</b>. Assim ele ganhará um link <code>https://</code> real e funcionará para qualquer pessoa da empresa.</li>
+            </ul>
+            <p class="text-xs text-slate-400 mt-4 border-t border-slate-200 dark:border-slate-700 pt-2">Erro técnico: ${err.message}</p>
+          </div>
+        `;
+      }
+    }
+
+    function renderCards(items, query = "") {
+      resultsGrid.innerHTML = "";
+      
+      if (items.length === 0) {
+        emptyState.classList.remove('hidden');
+        emptyStateMsg.textContent = "Nenhum filtro encontrado para esta busca.";
+        resultInfo.textContent = "";
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      resultInfo.textContent = `${items.length} resultados encontrados`;
+
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm hover:shadow-md transition-shadow";
+        
+        card.innerHTML = `
+          <div class="flex justify-between items-start mb-4">
+            <span class="text-[10px] font-bold px-2 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded uppercase">Protheus</span>
+            <button onclick="copy('${item['Código Protheus']}')" class="text-slate-400 hover:text-indigo-600 transition">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+          <h2 class="text-xl font-bold mb-1">${item['Código Protheus'] || 'N/A'}</h2>
+          <p class="text-sm text-slate-600 dark:text-slate-400 leading-snug mb-4">${item['Códigos e descrição'] || 'Sem descrição'}</p>
+          <div class="pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2">
+            <div>
+              <span class="block text-[10px] uppercase text-slate-400 font-bold">Original</span>
+              <span class="text-xs font-mono font-medium">${item['Código Original'] || '---'}</span>
+            </div>
+            <div class="text-right">
+              <span class="block text-[10px] uppercase text-slate-400 font-bold">Status</span>
+              <span class="text-xs font-medium text-emerald-600">Disponível</span>
+            </div>
+          </div>
+        `;
+        resultsGrid.appendChild(card);
+      });
+    }
+
+    function search() {
+      const query = cleanStr(searchInput.value);
+      if (!query) {
+        resultsGrid.innerHTML = "";
+        resultInfo.textContent = "";
+        emptyState.classList.add('hidden');
+        return;
+      }
+
+      const filtered = database.filter(item => item._search && item._search.includes(query));
+      renderCards(filtered, query);
+    }
+
+    window.copy = (text) => {
+      if(!text || text === 'N/A') return;
+      navigator.clipboard.writeText(text);
+      const btn = event.currentTarget;
+      const original = btn.innerHTML;
+      btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      setTimeout(() => btn.innerHTML = original, 2000);
+    };
+
+    searchInput.addEventListener('input', () => {
+      clearTimeout(this.timer);
+      this.timer = setTimeout(search, 300);
+    });
+
+    btnSearch.addEventListener('click', search);
+
+    init();
+  </script>
+</body>
+</html>
